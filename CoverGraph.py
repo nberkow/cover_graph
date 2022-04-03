@@ -1,6 +1,8 @@
 
 import requests
 import random
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 class GraphNode:
     def __init__(self, artist_name, artist_id):
@@ -8,20 +10,32 @@ class GraphNode:
         self.songs_written  = {} # key is song, val is artist
         self.artist_name = artist_name
         self.artist_id = artist_id
+        self.depth = 0 # distance from focal artist
+        self.in_path = 0
 
 class CoverGraph:
     def __init__(self):
         self.graph_nodes = {}
-        self.paths = []
+        self.paths = {}
         self.song_lookup = {}
         self.video_lookup = {}
         self.artist_lookup = {}
         self.verbose = False
+        self.session = requests.Session()
+        retry = Retry(connect=5, backoff_factor=1)
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
 
-    def print_edge_list(self):
+    def print_edge_list(self, file):
+
         for gn in self.graph_nodes.values():
             for song in gn.songs_covered:
-                print(f'{gn.artist_name}\t{self.song_lookup[song]}\t{gn.songs_covered[song].artist_name}\t{self.video_lookup[song]}')
+                print(f'{gn.artist_name}\t' + \
+                    f'{gn.songs_covered[song].artist_name}\t' + \
+                    f'{gn.depth}' + \
+                    f'{self.song_lookup[song[1]]}\t' + \
+                    f'{self.video_lookup[song[1]]}', file=file)
 
     def handle_works(self, depth, max_depth, back_node_queue, visited_list):
 
@@ -30,7 +44,7 @@ class CoverGraph:
         print(f'getting works by {n.artist_name}, total: {len(back_node_queue)} depth: {depth}')
         print(f'{p_url}')
 
-        perf_list = requests.get(p_url, headers={"Accept": "application/json"}).json()
+        perf_list = self.session.get(p_url, headers={"Accept": "application/json"}).json()
         print(len(perf_list))
         i = 0
         j = 0
@@ -44,9 +58,9 @@ class CoverGraph:
                     valid_orig_work = True
 
                     try:
-                        perf_resp = requests.get(perf['uri'], headers={"Accept": "application/json"}).json()
+                        perf_resp = self.session.get(perf['uri'], headers={"Accept": "application/json"}).json()
                         work_uri = perf_resp['works'][0]['uri']
-                        work_resp = requests.get(work_uri, headers={"Accept": "application/json"}).json()
+                        work_resp = self.session.get(work_uri, headers={"Accept": "application/json"}).json()
 
                         song_title = work_resp['title']
                         song_artist = perf_resp['performer']['name']
@@ -76,6 +90,7 @@ class CoverGraph:
                                 else:
                                     artist_node = GraphNode(perf_artist, perf_artist_id)
                                     self.graph_nodes[perf_artist_id] = artist_node
+                                    artist_node.depth = depth
 
                                 if 'external_uri' in perf:
                                     video_link = perf['external_uri'][0]['uri']
@@ -95,13 +110,11 @@ class CoverGraph:
                                         back_node_queue = [artist_node.artist_id] + back_node_queue
                                         visited_list.add(artist_node.artist_id)
                                         print(f'adding {artist_node.artist_name} ({artist_node.artist_id}) to queue, total: {len(back_node_queue)} depth: {depth}')
-                                        print(len(back_node_queue))
+                                        print(f'node queue: {len(back_node_queue)}')
                                         #print(back_node_queue)
 
                     if len(back_node_queue) > 0 and depth < max_depth:
                         self.handle_works(depth+1, max_depth, back_node_queue, visited_list)
-                
-
 
     def handle_perfs(self, depth, max_depth, node_queue, visited_list):
         
@@ -109,7 +122,7 @@ class CoverGraph:
         p_url = 'https://secondhandsongs.com/artist/%s/performances' % (n.artist_id)
         print(f'getting performances by {n.artist_name}\td: {depth}')
         try:
-            perf_list = requests.get(p_url, headers={"Accept": "application/json"}).json()
+            perf_list = self.session.get(p_url, headers={"Accept": "application/json"}).json()
         except:
             perf_list = {'error'}
         print(len(perf_list))
@@ -120,7 +133,7 @@ class CoverGraph:
                     
                     valid_json = True
                     try:
-                        pr = requests.get(perf['uri'], headers={"Accept": "application/json"})
+                        pr = self.session.get(perf['uri'], headers={"Accept": "application/json"})
                         perf_resp = pr.json()
                     except:
                         valid_json = False
@@ -140,38 +153,43 @@ class CoverGraph:
                                 ids = []
 
                             for song_artist_id in ids:
-                                
+                                skip = False
                                 if song_artist_id in self.graph_nodes:
                                     artist_node = self.graph_nodes[song_artist_id]
                                 else:
-                                    a_url = 'https://secondhandsongs.com/artist/%s' % (song_artist_id)
-                                    artist_resp = requests.get(a_url, headers={"Accept": "application/json"}).json()
-                                    #print(artist_resp)
-                                    song_artist = artist_resp['commonName']
-                                    artist_node = GraphNode(song_artist, song_artist_id)
-                                    self.graph_nodes[song_artist_id] = artist_node
+                                    try:
+                                        a_url = 'https://secondhandsongs.com/artist/%s' % (song_artist_id)
+                                        artist_resp = self.session.get(a_url, headers={"Accept": "application/json"}).json()
+                                        #print(artist_resp)
+                                        song_artist = artist_resp['commonName']
+                                        artist_node = GraphNode(song_artist, song_artist_id)
+                                        artist_node.depth = depth
+                                        self.graph_nodes[song_artist_id] = artist_node
+                                    except:
+                                        skip = True
                                 
-                                song_title = original['title']
-                                if self.verbose:
-                                    print(f'adding cover of:\t{song_title}\tby\t{song_artist} total: {len(node_queue)} depth: {depth}')
+                                if not skip:
+                                    song_title = original['title']
+                                    if self.verbose:
+                                        print(f'adding cover of:\t{song_title}\tby\t{song_artist} total: {len(node_queue)} depth: {depth}')
 
-                                song_id = original['uri'].split("/")[-1]
-                                self.song_lookup[song_id] = song_title
-                                self.video_lookup[song_id] = video_link
+                                    song_id = original['uri'].split("/")[-1]
+                                    self.song_lookup[song_id] = song_title
+                                    self.video_lookup[song_id] = video_link
 
-                                pids = perf_artist_id_concat.split("+")
-                                if len(pids) > 4:
-                                    pids = []
-                                for perf_artist_id in pids:
-                                    #print(perf_artist_id, song_artist_id)
-                                    n.songs_covered[(song_artist_id, song_id, perf_artist_id)] = artist_node
-                                    artist_node.songs_written[(song_artist_id, song_id, perf_artist_id)] = n
+                                    pids = perf_artist_id_concat.split("+")
+                                    if len(pids) > 4:
+                                        pids = []
+                                    for perf_artist_id in pids:
+                                        #print(perf_artist_id, song_artist_id)
+                                        n.songs_covered[(song_artist_id, song_id, perf_artist_id)] = artist_node
+                                        artist_node.songs_written[(song_artist_id, song_id, perf_artist_id)] = n
 
-                                    if depth <= max_depth:
-                                        if not artist_node.artist_id in visited_list:
-                                            node_queue = [artist_node.artist_id] + node_queue
-                                            visited_list.add(artist_node.artist_id)
-                                            print(f'adding:{artist_node.artist_name} to queue ({song_title} :: {n.artist_name}) total: {len(node_queue)} depth: {depth}')
+                                        if depth <= max_depth:
+                                            if not artist_node.artist_id in visited_list:
+                                                node_queue = [artist_node.artist_id] + node_queue
+                                                visited_list.add(artist_node.artist_id)
+                                                print(f'adding:{artist_node.artist_name} to queue ({song_title} :: {n.artist_name}) total: {len(node_queue)} depth: {depth}')
                 if len(node_queue) > 0 and depth < max_depth:
                     self.handle_perfs(depth+1, max_depth, node_queue, visited_list)
 
@@ -197,7 +215,53 @@ class CoverGraph:
             path = covered_by
             edges = list(path.songs_written.keys())
 
-    def dfs(self, stack, current_path, min_path_len, depth, visited_nodes, out_file):
+    def make_path_graph(self, path, out_file):
+        """
+        follow a linear chain of nodes representing the list of songs and mark the edge list
+        """
+
+        edges = list(path.songs_written.keys())
+
+        if len(edges) >= 2:
+            print('ERROR: non-linear path')
+            print(edges)
+
+        print("\n", file=out_file)
+        path_edges = set()
+
+        while len(edges) == 1:
+            edge_id = edges[0]
+            path_edges.add(edge_id)
+            covered_by = path.songs_written[edge_id]
+            path = covered_by
+            edges = list(path.songs_written.keys())
+
+        for gn in self.graph_nodes.values():
+            for edge_id in gn.songs_covered:
+                in_path = 0
+                if edge_id in path_edges:
+                    in_path = 1
+                print(
+                    f'{gn.artist_id}\t' + \
+                    f'{gn.songs_covered[edge_id].artist_id}\t' + \
+                    f'{edge_id[1]}\t{in_path}\t' + \
+                    f'{gn.artist_name}\t' + \
+                    f'{gn.songs_covered[edge_id].artist_name}\t' + \
+                    f'{gn.depth}' + \
+                    f'{self.song_lookup[edge_id[1]]}\t' + \
+                    f'{self.video_lookup[edge_id[1]]}', file=out_file)
+
+
+    def print_playlists(self, out_file):
+        k = list(self.paths.keys())
+        k.sort(reverse=True)
+
+        for path_depth in self.paths:
+            paths = self.paths[path_depth]
+            for p in paths:
+                self.print_playlist(p, out_file)
+
+    def dfs(self, stack, current_path, min_path_len, depth, visited_nodes):
         """
         follow edges, cover-er to cover-ee.
         """
@@ -215,8 +279,10 @@ class CoverGraph:
         if len(n.songs_covered) == 0:
             print("leaf:\t%s" % (n.artist_name))
             if depth >= min_path_len:
-                self.paths.append(current_path)
-                self.print_playlist(current_path, out_file)
+                if not depth in self.paths:
+                    self.paths[depth] = []
+                self.paths[depth].append(current_path)
+                #self.print_playlist(current_path, out_file)
 
         # for internal nodes continue the search
         for edge_id in n.songs_covered:
@@ -237,9 +303,9 @@ class CoverGraph:
                 print("------")
 
             if len(stack) > 0:
-                self.dfs(stack, updated_path, min_path_len, depth+1, visited_nodes, out_file)
+                self.dfs(stack, updated_path, min_path_len, depth+1, visited_nodes)
 
-    def get_paths_exhaustive_dfs(self, min_path_len, out_file):
+    def get_paths_exhaustive_dfs(self, min_path_len):
         for n in self.graph_nodes.values():
 
             current_path = GraphNode(n.artist_name, n.artist_id)
@@ -247,7 +313,7 @@ class CoverGraph:
             if len(n.songs_written) == 0 and len(n.songs_covered) > 0:
                 print(n.artist_name, n.artist_id)
                 print(n.songs_covered)
-                self.dfs(stack, current_path, min_path_len, 0, set([n.artist_id]), out_file)
+                self.dfs(stack, current_path, min_path_len, 0, set([n.artist_id]))
 
     """
     def get_paths_random_dfs(self, x, min_path_len, out_file):

@@ -1,5 +1,7 @@
 from CoverGraph import *
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 shs_url = 'https://secondhandsongs.com/search/'
 
@@ -28,21 +30,27 @@ if __name__ == "__main__":
     print(response.json())
     """
 
-    for focal_artist in ['Phoebe Bridgers', 
-        'R.E.M.',
+    """['R.E.M.',
+        'Nirvana', 
         'Olivia Rodrigo',
+        'Bebe Rexha'
         's club 7',
-        'CHVRCHES',
         'Garth Brooks', 
         'Weezer',
+        'get up kids',
+        'CHVRCHES',
         'Gillian Welch', 
-        'Nirvana', 
         'Katy Perry',
-        'Taylor Swift']:
+        'Taylor Swift',
+        'Phoebe Bridgers']:"""
+    for focal_artist in ['Phoebe Bridgers']:
 
         print("".join(focal_artist.split()))
         out_path = '/mnt/c/Documents and Settings/Nathan/Documents/covers/'
-        with open('%s%s_playlists.txt' % (out_path, "".join(focal_artist.split())), 'w') as lists_file:
+        with open('%s%s_playlists.txt' % (out_path, "".join(focal_artist.split())), 'w') as lists_file, \
+             open('%s%s_artists.txt' % (out_path, "".join(focal_artist.split())), 'w') as artists_file, \
+             open('%s%s_graph.txt' % (out_path, "".join(focal_artist.split())), 'w') as graph_file, \
+             open('%s%s_path_graph.txt' % (out_path, "".join(focal_artist.split())), 'w') as path_graph_file:
             p = {"commonName":focal_artist}
             g = CoverGraph()
             g.song_lookup = {}
@@ -66,17 +74,30 @@ if __name__ == "__main__":
                 back_node_queue.append(artist_id)
 
                 print("building graph")
+                # build the graph in both directions
 
                 # works of the focal artist covered by others
                 g.handle_works(depth, fwd_depth, back_node_queue, set([artist_id]))
 
-                # covered of other artists by the focal artist
+                # covers of other artists by the focal artist
                 g.handle_perfs(depth, back_depth, node_queue, set([artist_id]))
                 print("graph built!")
-                for n in g.graph_nodes.values():
-                    print(f"\t{n.artist_name}\t{n.artist_id}")
+                
+                # save the graph
+                g.print_edge_list(graph_file)
 
-                g.get_paths_exhaustive_dfs(min_path_depth, lists_file)
+                for n in g.graph_nodes.values():
+                    print(f"\t{n.artist_name}\t{n.artist_id}", file = artists_file)
+
+                g.get_paths_exhaustive_dfs(min_path_depth)
+                
+                g.print_playlists(lists_file)
+
+                # print the graph with a path highlighted (make random)
+                d = list(g.path.keys())[0]
+                r = list(g.path[d].keys())[0]
+                p = g.path[d][r]
+                g.make_path_graph(p, path_graph_file)
 
             #g.print_edge_list()
 
