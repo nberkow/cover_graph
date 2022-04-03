@@ -1,7 +1,6 @@
 from CoverGraph import *
 import requests
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+
 
 shs_url = 'https://secondhandsongs.com/search/'
 
@@ -57,9 +56,9 @@ if __name__ == "__main__":
             node_queue = [] 
             back_node_queue = [] 
             depth = 0
-            fwd_depth = 5
-            back_depth = 2
-            min_path_depth = 4
+            fwd_depth = 7
+            back_depth = 3
+            min_path_depth = 5
 
             # get the focal artist. Assume it's the first entry in the list
             response = requests.get(shs_url + "artist", params=p, headers={"Accept": "application/json"})
@@ -94,9 +93,10 @@ if __name__ == "__main__":
                 g.print_playlists(lists_file)
 
                 # print the graph with a path highlighted (make random)
-                d = list(g.path.keys())[0]
-                r = list(g.path[d].keys())[0]
-                p = g.path[d][r]
+                d = list(g.paths.keys())
+                d.sort(reverse=True)
+                s = list(g.paths[d[0]])
+                p = s[0]
                 g.make_path_graph(p, path_graph_file)
 
             #g.print_edge_list()

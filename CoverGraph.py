@@ -1,6 +1,7 @@
 
 import requests
 import random
+import math
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
@@ -26,6 +27,9 @@ class CoverGraph:
         adapter = HTTPAdapter(max_retries=retry)
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
+        self.edge_target = 27
+        self.decay = 2/3
+        random.seed(22)
 
     def print_edge_list(self, file):
 
@@ -33,7 +37,7 @@ class CoverGraph:
             for song in gn.songs_covered:
                 print(f'{gn.artist_name}\t' + \
                     f'{gn.songs_covered[song].artist_name}\t' + \
-                    f'{gn.depth}' + \
+                    f'{gn.depth}\t' + \
                     f'{self.song_lookup[song[1]]}\t' + \
                     f'{self.video_lookup[song[1]]}', file=file)
 
@@ -45,13 +49,18 @@ class CoverGraph:
         print(f'{p_url}')
 
         perf_list = self.session.get(p_url, headers={"Accept": "application/json"}).json()
-        print(len(perf_list))
+
         i = 0
         j = 0
+        k = 0
         if not 'error' in perf_list:
-            # find all the works by this artist
-            for perf in perf_list:
-                
+            # find works by this artist
+            random.shuffle(perf_list)
+            adj = math.floor(self.edge_target * ((self.decay)**depth)) + 1
+            if self.verbose:
+                print(len(perf_list), '-', adj)
+            while k < adj and j < len(perf_list):
+                perf = perf_list[j]
                 valid_orig_work = False
                 if perf['isOriginal']:
                     i += 1
@@ -67,7 +76,7 @@ class CoverGraph:
                         song_artist_id_concat = perf_resp['performer']['uri'].split("/")[-1]
                         song_id = work_resp['uri'].split("/")[-1]
                         self.song_lookup[song_id] = song_title
-                        j += 1
+                        
                         
                     except:
                         if self.verbose:
@@ -76,7 +85,7 @@ class CoverGraph:
 
                 # find all the covers of the work
                 if valid_orig_work:
-                    print(song_title, i , j)
+                    print(song_title, i , j, k)
                     for perf in work_resp['versions']:
                         perf_artist = perf['performer']['name']
                         perf_artist_id_concat = perf['performer']['uri'].split("/")[-1]
@@ -111,16 +120,20 @@ class CoverGraph:
                                         visited_list.add(artist_node.artist_id)
                                         print(f'adding {artist_node.artist_name} ({artist_node.artist_id}) to queue, total: {len(back_node_queue)} depth: {depth}')
                                         print(f'node queue: {len(back_node_queue)}')
+                                        k += 1
                                         #print(back_node_queue)
 
                     if len(back_node_queue) > 0 and depth < max_depth:
                         self.handle_works(depth+1, max_depth, back_node_queue, visited_list)
+                j += 1
 
     def handle_perfs(self, depth, max_depth, node_queue, visited_list):
         
         n = self.graph_nodes[node_queue.pop()]
         p_url = 'https://secondhandsongs.com/artist/%s/performances' % (n.artist_id)
         print(f'getting performances by {n.artist_name}\td: {depth}')
+        k = 0
+        j = 0
         try:
             perf_list = self.session.get(p_url, headers={"Accept": "application/json"}).json()
         except:
@@ -128,7 +141,11 @@ class CoverGraph:
         print(len(perf_list))
 
         if not 'error' in perf_list:
-            for perf in perf_list:
+            random.shuffle(perf_list)
+            adj = math.floor(self.edge_target * ((self.decay)**depth)) + 1
+            print(len(perf_list), '-', adj)
+            while j < len(perf_list) and k <= adj:
+                perf = perf_list[j]
                 if not perf['isOriginal']:
                     
                     valid_json = True
@@ -172,7 +189,7 @@ class CoverGraph:
                                     song_title = original['title']
                                     if self.verbose:
                                         print(f'adding cover of:\t{song_title}\tby\t{song_artist} total: {len(node_queue)} depth: {depth}')
-
+                                    k += 1
                                     song_id = original['uri'].split("/")[-1]
                                     self.song_lookup[song_id] = song_title
                                     self.video_lookup[song_id] = video_link
@@ -184,6 +201,7 @@ class CoverGraph:
                                         #print(perf_artist_id, song_artist_id)
                                         n.songs_covered[(song_artist_id, song_id, perf_artist_id)] = artist_node
                                         artist_node.songs_written[(song_artist_id, song_id, perf_artist_id)] = n
+                                        
 
                                         if depth <= max_depth:
                                             if not artist_node.artist_id in visited_list:
@@ -192,6 +210,7 @@ class CoverGraph:
                                                 print(f'adding:{artist_node.artist_name} to queue ({song_title} :: {n.artist_name}) total: {len(node_queue)} depth: {depth}')
                 if len(node_queue) > 0 and depth < max_depth:
                     self.handle_perfs(depth+1, max_depth, node_queue, visited_list)
+                j += 1
 
 
     def print_playlist(self, path, out_file):
@@ -211,7 +230,7 @@ class CoverGraph:
             a1, work_id, a2 = edge_id
             work_name = self.song_lookup[work_id]
             covered_by = path.songs_written[edge_id]
-            print(f'\t{covered_by.artist_name}\t{work_name}\t{path.artist_name}\t{self.video_lookup[work_id]}', file=out_file)
+            print(f'{covered_by.artist_name}\t{work_name}\t{path.artist_name}\t{self.video_lookup[work_id]}', file=out_file)
             path = covered_by
             edges = list(path.songs_written.keys())
 
@@ -247,7 +266,7 @@ class CoverGraph:
                     f'{edge_id[1]}\t{in_path}\t' + \
                     f'{gn.artist_name}\t' + \
                     f'{gn.songs_covered[edge_id].artist_name}\t' + \
-                    f'{gn.depth}' + \
+                    f'{gn.depth}\t' + \
                     f'{self.song_lookup[edge_id[1]]}\t' + \
                     f'{self.video_lookup[edge_id[1]]}', file=out_file)
 
