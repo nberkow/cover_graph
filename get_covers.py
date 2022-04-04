@@ -28,28 +28,39 @@ if __name__ == "__main__":
     response = requests.get(shs_url, headers={"Accept": "application/json"})
     print(response.json())
     """
-
-    """['R.E.M.',
-        'Nirvana', 
+for focal_artist in ['R.E.M.',
+        'Nirvana',
+        'Pearl Jam',
+        'Creed',
+        'Johnny Cash',
+        'the breeders',
         'Olivia Rodrigo',
         'Bebe Rexha'
         's club 7',
+        'travis trit',
+        'kenney chesney',
         'Garth Brooks', 
         'Weezer',
         'get up kids',
-        'CHVRCHES',
+        'alessia cara',
+        'the band',
+        'the who',
+        'velvet underground',
+        'mr t experience']:
+
+        """['CHVRCHES',
         'Gillian Welch', 
         'Katy Perry',
-        'Taylor Swift',
-        'Phoebe Bridgers']:"""
-    for focal_artist in ['Phoebe Bridgers']:
+        'Taylor Swift']:"""
+    
 
         print("".join(focal_artist.split()))
         out_path = '/mnt/c/Documents and Settings/Nathan/Documents/covers/'
         with open('%s%s_playlists.txt' % (out_path, "".join(focal_artist.split())), 'w') as lists_file, \
              open('%s%s_artists.txt' % (out_path, "".join(focal_artist.split())), 'w') as artists_file, \
              open('%s%s_graph.txt' % (out_path, "".join(focal_artist.split())), 'w') as graph_file, \
-             open('%s%s_path_graph.txt' % (out_path, "".join(focal_artist.split())), 'w') as path_graph_file:
+             open('%s%s_path_graph.txt' % (out_path, "".join(focal_artist.split())), 'w') as path_graph_file, \
+             open('%s%s_path_graph.txt' % (out_path, "".join(focal_artist.split())), 'w') as path_text_file:
             p = {"commonName":focal_artist}
             g = CoverGraph()
             g.song_lookup = {}
@@ -57,8 +68,8 @@ if __name__ == "__main__":
             back_node_queue = [] 
             depth = 0
             fwd_depth = 7
-            back_depth = 3
-            min_path_depth = 5
+            back_depth = 2
+            min_path_depth = 4
 
             # get the focal artist. Assume it's the first entry in the list
             response = requests.get(shs_url + "artist", params=p, headers={"Accept": "application/json"})
@@ -97,7 +108,7 @@ if __name__ == "__main__":
                 d.sort(reverse=True)
                 s = list(g.paths[d[0]])
                 p = s[0]
-                g.make_path_graph(p, path_graph_file)
+                g.make_path_graph(p, path_graph_file, path_text_file)
 
             #g.print_edge_list()
 

@@ -27,19 +27,9 @@ class CoverGraph:
         adapter = HTTPAdapter(max_retries=retry)
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
-        self.edge_target = 27
-        self.decay = 2/3
+        self.edge_target = 30
+        self.decay = 3/5
         random.seed(22)
-
-    def print_edge_list(self, file):
-
-        for gn in self.graph_nodes.values():
-            for song in gn.songs_covered:
-                print(f'{gn.artist_name}\t' + \
-                    f'{gn.songs_covered[song].artist_name}\t' + \
-                    f'{gn.depth}\t' + \
-                    f'{self.song_lookup[song[1]]}\t' + \
-                    f'{self.video_lookup[song[1]]}', file=file)
 
     def handle_works(self, depth, max_depth, back_node_queue, visited_list):
 
@@ -99,7 +89,7 @@ class CoverGraph:
                                 else:
                                     artist_node = GraphNode(perf_artist, perf_artist_id)
                                     self.graph_nodes[perf_artist_id] = artist_node
-                                    artist_node.depth = depth
+                                    artist_node.depth = depth + 1
 
                                 if 'external_uri' in perf:
                                     video_link = perf['external_uri'][0]['uri']
@@ -131,7 +121,7 @@ class CoverGraph:
         
         n = self.graph_nodes[node_queue.pop()]
         p_url = 'https://secondhandsongs.com/artist/%s/performances' % (n.artist_id)
-        print(f'getting performances by {n.artist_name}\td: {depth}')
+        print(f'getting cover performances by {n.artist_name}\td: {depth}')
         k = 0
         j = 0
         try:
@@ -169,6 +159,7 @@ class CoverGraph:
                             if len(ids) > 4:
                                 ids = []
 
+                            ids = list(set(ids))
                             for song_artist_id in ids:
                                 skip = False
                                 if song_artist_id in self.graph_nodes:
@@ -177,10 +168,9 @@ class CoverGraph:
                                     try:
                                         a_url = 'https://secondhandsongs.com/artist/%s' % (song_artist_id)
                                         artist_resp = self.session.get(a_url, headers={"Accept": "application/json"}).json()
-                                        #print(artist_resp)
                                         song_artist = artist_resp['commonName']
                                         artist_node = GraphNode(song_artist, song_artist_id)
-                                        artist_node.depth = depth
+                                        artist_node.depth = depth + 1
                                         self.graph_nodes[song_artist_id] = artist_node
                                     except:
                                         skip = True
@@ -198,7 +188,6 @@ class CoverGraph:
                                     if len(pids) > 4:
                                         pids = []
                                     for perf_artist_id in pids:
-                                        #print(perf_artist_id, song_artist_id)
                                         n.songs_covered[(song_artist_id, song_id, perf_artist_id)] = artist_node
                                         artist_node.songs_written[(song_artist_id, song_id, perf_artist_id)] = n
                                         
@@ -234,7 +223,17 @@ class CoverGraph:
             path = covered_by
             edges = list(path.songs_written.keys())
 
-    def make_path_graph(self, path, out_file):
+    def print_edge_list(self, file):
+
+        for gn in self.graph_nodes.values():
+            for song in gn.songs_covered:
+                print(f'{gn.artist_name}\t' + \
+                    f'{gn.songs_covered[song].artist_name}\t' + \
+                    f'{gn.depth}\t' + \
+                    f'{self.song_lookup[song[1]]}\t' + \
+                    f'{self.video_lookup[song[1]]}', file=file)
+
+    def make_path_graph(self, path, out_file, text_file):
         """
         follow a linear chain of nodes representing the list of songs and mark the edge list
         """
@@ -254,8 +253,12 @@ class CoverGraph:
             covered_by = path.songs_written[edge_id]
             path = covered_by
             edges = list(path.songs_written.keys())
+            print(f'{gn.artist_id}', file = text_file)
+            print(f'{edge_id[1]}\t{in_path}', file = text_file)
+        print(f'{gn.artist_id}', file = text_file)
 
         for gn in self.graph_nodes.values():
+
             for edge_id in gn.songs_covered:
                 in_path = 0
                 if edge_id in path_edges:
@@ -264,6 +267,7 @@ class CoverGraph:
                     f'{gn.artist_id}\t' + \
                     f'{gn.songs_covered[edge_id].artist_id}\t' + \
                     f'{edge_id[1]}\t{in_path}\t' + \
+                    f'{edge_id[0]},{edge_id[1]},{edge_id[2]}' + \
                     f'{gn.artist_name}\t' + \
                     f'{gn.songs_covered[edge_id].artist_name}\t' + \
                     f'{gn.depth}\t' + \
